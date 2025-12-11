@@ -15,6 +15,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
+# ---------------- Modal ---------------- #
 class AnnounceModal(discord.ui.Modal, title="Create Event Announcement"):
     event_link = discord.ui.TextInput(label="Event Link", placeholder="Enter TruckerMP Event Link")
     destination = discord.ui.TextInput(label="Destination", placeholder="Enter Destination")
@@ -30,15 +32,16 @@ class AnnounceModal(discord.ui.Modal, title="Create Event Announcement"):
             event_id = self.event_link.value.rstrip("/").split("/")[-1]
             response = requests.get(f"https://truckersmp.com/api/v2/events/{event_id}")
             data = response.json()["response"]
-            event_name = data["name"]
-            description = data["description"]
+
+            event_name = data.get("name", "Unnamed Event")
+            description = data.get("description", "No description")
             start_time_utc = datetime.fromisoformat(data["start_at"].replace("Z", "+00:00"))
             meetup_time_utc = datetime.fromisoformat(data["meetup_at"].replace("Z", "+00:00"))
 
-            # Auto-fetch Route Image from TruckerMP
-            route_image = data.get("route_image") or "No route image available"
+            # Auto-fetch Route Image
+            route_image = data.get("route_image") or None
 
-            # Convert UTC -> NPT (+5:45)
+            # Convert UTC -> NPT
             npt = pytz.timezone("Asia/Kathmandu")
             start_time_npt = start_time_utc.astimezone(npt)
             meetup_time_npt = meetup_time_utc.astimezone(npt)
@@ -47,7 +50,7 @@ class AnnounceModal(discord.ui.Modal, title="Create Event Announcement"):
             await interaction.response.send_message(f"Failed to fetch event: {e}", ephemeral=True)
             return
 
-        # Save data for next step
+        # Save event data
         self.event_data = {
             "name": event_name,
             "description": description,
@@ -66,6 +69,7 @@ class AnnounceModal(discord.ui.Modal, title="Create Event Announcement"):
         await interaction.response.send_message("Select the channel to send the announcement:", view=view, ephemeral=True)
 
 
+# ---------------- Channel Select ---------------- #
 class ChannelSelect(discord.ui.Select):
     def __init__(self, event_data, channels):
         options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in channels]
@@ -76,7 +80,7 @@ class ChannelSelect(discord.ui.Select):
         channel_id = int(self.values[0])
         channel = interaction.guild.get_channel(channel_id)
 
-        # Single embed containing both Slot and Route images
+        # Single embed with Slot Image (main) + Route Image
         embed = discord.Embed(
             title=self.event_data["name"],
             description=self.event_data["description"],
@@ -93,11 +97,12 @@ class ChannelSelect(discord.ui.Select):
             value=f'{self.event_data["start_time_utc"]} | {self.event_data["start_time_npt"]}',
             inline=False
         )
+
         # Slot Image as main large image
         embed.set_image(url=self.event_data["slot_image"])
 
-        # Route Image shown in a field using markdown
-        if self.event_data["route_image"] and self.event_data["route_image"] != "No route image available":
+        # Route Image shown in a field with markdown
+        if self.event_data["route_image"]:
             embed.add_field(
                 name="Route Image",
                 value=f"[View Route Image]({self.event_data['route_image']})",
@@ -114,14 +119,23 @@ class ChannelSelectView(discord.ui.View):
         self.add_item(ChannelSelect(event_data, channels))
 
 
+# ---------------- Slash Command ---------------- #
 @bot.tree.command(name="announce", description="Create an event announcement")
 async def announce(interaction: discord.Interaction):
     await interaction.response.send_modal(AnnounceModal(bot))
 
 
+# ---------------- Bot Ready ---------------- #
 @bot.event
 async def on_ready():
-    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    print(f"Logged in as {bot.user}")
+    try:
+        # Register slash commands for your guild immediately
+        guild = discord.Object(id=GUILD_ID)
+        await bot.tree.sync(guild=guild)
+        print(f"Slash commands synced for guild {GUILD_ID}")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
+    print(f"Bot is ready as {bot.user}")
 
-bot.run(TOKEN)
+
+bot.run(TOKEN)p
